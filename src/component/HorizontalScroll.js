@@ -28,6 +28,7 @@ const getGalleryLayout = (containerWidth) => {
 		itemAmount * itemWidth +
 		(itemAmount - 1) * showcaseItemGap +
 		showcaseContainerGap * 2;
+	const sequenceWidth = itemAmount * (itemWidth + showcaseItemGap);
 
 	return {
 		containerWidth,
@@ -37,6 +38,7 @@ const getGalleryLayout = (containerWidth) => {
 		listingWidth,
 		loopCopiesPerSide:
 			Math.ceil(containerWidth / (listingWidth * 2)) + 1,
+		sequenceWidth,
 	};
 };
 
@@ -351,7 +353,7 @@ function HorizontalScroll() {
 					deltaX={deltaX}
 					hasTransition={hasTransition}
 					loopOffset={
-						galleryLayout.loopCopiesPerSide * galleryLayout.listingWidth
+						galleryLayout.loopCopiesPerSide * galleryLayout.sequenceWidth
 					}
 					listingWidth={galleryLayout.listingWidth}
 					transitionDuration={transitionDuration}
