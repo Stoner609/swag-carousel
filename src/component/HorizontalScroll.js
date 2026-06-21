@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import styled from "styled-components";
 
+// 互動參數集中在此，方便依手感統一調整。
 const showcaseSwipeTransitionSeconds = 0.6;
 const dragStartThreshold = 8;
 const flingVelocityThreshold = 0.45;
-const itemAmount = 5;
+const virtualItemBuffer = 2;
 const maximumItemWidth = 320;
 const showcaseItemGap = 12;
 const showcaseContainerGap = 12;
@@ -17,41 +18,49 @@ const initialVideos = [
 	{ name: "Forest waterfall", image: "/images/forest.jpg" },
 	{ name: "Ocean wave", image: "/images/ocean.jpg" },
 	{ name: "Desert expedition", image: "/images/desert.jpg" },
+	{ name: "Alpine lake", image: "/images/alpine-lake.png" },
+	{ name: "Green river valley", image: "/images/green-valley.png" },
+	{ name: "Red sandstone canyon", image: "/images/red-canyon.png" },
 ];
 
+const getCircularIndex = (index, itemCount) =>
+	((index % itemCount) + itemCount) % itemCount;
+
+// 由容器寬度推導幾何資料與視窗大小；virtualItemCount 與資料總數無關。
 const getGalleryLayout = (containerWidth) => {
 	const itemWidth = Math.min(
 		maximumItemWidth,
 		Math.max(1, containerWidth - mobileSidePeek * 2)
 	);
+	const itemStep = itemWidth + showcaseItemGap;
+	const visibleItemCount = Math.ceil(containerWidth / itemStep) + 1;
+	const virtualItemCount = visibleItemCount + virtualItemBuffer * 2;
 	const listingWidth =
-		itemAmount * itemWidth +
-		(itemAmount - 1) * showcaseItemGap +
+		virtualItemCount * itemWidth +
+		(virtualItemCount - 1) * showcaseItemGap +
 		showcaseContainerGap * 2;
-	const sequenceWidth = itemAmount * (itemWidth + showcaseItemGap);
 
 	return {
 		containerWidth,
 		itemHeight: itemWidth * 0.625,
-		itemStep: itemWidth + showcaseItemGap,
+		itemStep,
 		itemWidth,
 		listingWidth,
-		loopCopiesPerSide:
-			Math.ceil(containerWidth / (listingWidth * 2)) + 1,
-		sequenceWidth,
+		virtualItemCount,
 	};
 };
 
-function VideoElement({ dimensions, isClone = false, isSelected, onSelect, value }) {
+function VideoElement({ dimensions, isBuffer = false, isSelected, onSelect, value }) {
 	return (
 		<VideoCard
 			$height={dimensions.itemHeight}
 			$width={dimensions.itemWidth}
-			aria-hidden={isClone}
+			// 緩衝卡片只讓拖曳期間不露白，不納入鍵盤與輔具的可操作範圍。
+			aria-hidden={isBuffer}
 			aria-pressed={isSelected}
 			onClick={() => onSelect(value.name)}
 			selected={isSelected}
-			tabIndex={isClone ? -1 : undefined}
+			tabIndex={isBuffer ? -1 : undefined}
 			type="button"
 		>
 			<CardImage
@@ -66,6 +75,7 @@ function VideoElement({ dimensions, isClone = false, isSelected, onSelect, value
 }
 
 function Swipeable({ children, onSwipeStart, onSwiping, onSwipeEnd }) {
+	// Pointer 事件高頻觸發時仍保留最新 callback，避免手勢監聽器因 props 更新而重建。
 	const callbacksRef = useRef({ onSwipeStart, onSwiping, onSwipeEnd });
 	const pointerId = useRef(null);
 	const startX = useRef(0);
@@ -83,6 +93,7 @@ function Swipeable({ children, onSwipeStart, onSwiping, onSwipeEnd }) {
 
 		const deltaX = endX.current - startX.current;
 		const elapsed = Math.max(Date.now() - startTime.current, 1);
+		// px/ms：距離不足時仍可讓快速甩動換到下一張。
 		const velocityX = Math.abs(deltaX) / elapsed;
 		const didDrag = isDragging.current;
 
@@ -127,6 +138,7 @@ function Swipeable({ children, onSwipeStart, onSwiping, onSwipeEnd }) {
 		const deltaY = event.clientY - startY.current;
 
 		if (gestureAxis.current === "pending") {
+			// 先越過死區再判斷軸向，避免點擊時的微小抖動被當成滑動。
 			if (
 				Math.max(Math.abs(deltaX), Math.abs(deltaY)) < dragStartThreshold
 			) {
@@ -136,6 +148,7 @@ function Swipeable({ children, onSwipeStart, onSwiping, onSwipeEnd }) {
 				Math.abs(deltaX) >= Math.abs(deltaY) ? "horizontal" : "vertical";
 		}
 
+		// 保留垂直手勢給頁面捲動。
 		if (gestureAxis.current !== "horizontal") return;
 
 		if (!isDragging.current) {
@@ -155,8 +168,7 @@ function Swipeable({ children, onSwipeStart, onSwiping, onSwipeEnd }) {
 		(event) => {
 			if (event.pointerId !== pointerId.current) return;
 
-			// The last pointermove can be skipped during a fast fling, so the
-			// release coordinate must be recorded before deriving the swipe.
+			// 快速甩動時最後一次 pointermove 可能遺失，因此以放開座標作為最終位置。
 			endX.current = event.clientX;
 			finishSwipe();
 		},
@@ -173,6 +185,7 @@ function Swipeable({ children, onSwipeStart, onSwiping, onSwipeEnd }) {
 	);
 
 	const handleClickCapture = useCallback((event) => {
+		// 拖曳結束會接著觸發 click；攔截它以免意外選取卡片。
 		if (!suppressClick.current) return;
 
 		event.preventDefault();
@@ -180,6 +193,7 @@ function Swipeable({ children, onSwipeStart, onSwiping, onSwipeEnd }) {
 		suppressClick.current = false;
 	}, []);
 
+	// 元件卸載時一併結束仍被 capture 的手勢，避免保留過期狀態。
 	useEffect(() => finishSwipe, [finishSwipe]);
 
 	return (
@@ -203,8 +217,8 @@ function HorizontalScroll() {
 		showcaseSwipeTransitionSeconds
 	);
 	const [deltaX, setDeltaX] = useState(0);
-	const [videoList, setVideoList] = useState(initialVideos);
 	const [selectedVideo, setSelectedVideo] = useState(initialVideos[0].name);
+	const [activeIndex, setActiveIndex] = useState(0);
 	const [galleryLayout, setGalleryLayout] = useState(() =>
 		getGalleryLayout(window.innerWidth)
 	);
@@ -214,6 +228,7 @@ function HorizontalScroll() {
 	const pendingDirection = useRef(null);
 
 	const scheduleDeltaX = useCallback((nextDeltaX) => {
+		// 將高頻 pointermove 壓到每個繪製影格最多一次 React state 更新。
 		cancelAnimationFrame(frameId.current);
 		frameId.current = requestAnimationFrame(() => setDeltaX(nextDeltaX));
 	}, []);
@@ -225,10 +240,9 @@ function HorizontalScroll() {
 		cancelAnimationFrame(frameId.current);
 		clearTimeout(transitionTimer.current);
 		pendingDirection.current = null;
-		setVideoList((videos) =>
-			direction === "left"
-				? [...videos.slice(1), videos[0]]
-				: [videos[videos.length - 1], ...videos.slice(0, -1)]
+		// 動畫走完才變更邏輯索引並把位移歸零；下一個虛擬視窗會無縫地取代舊視窗。
+		setActiveIndex((index) =>
+			getCircularIndex(index + (direction === "left" ? 1 : -1), initialVideos.length)
 		);
 		setDeltaX(0);
 		setHasTransition(false);
@@ -242,6 +256,7 @@ function HorizontalScroll() {
 	}, []);
 
 	const handleSwipeStart = useCallback(() => {
+		// 若上一段過場尚未完成，先提交其索引變更，避免連續滑動造成狀態不同步。
 		commitPendingRotation();
 		cancelAnimationFrame(frameId.current);
 		clearTimeout(transitionTimer.current);
@@ -252,6 +267,7 @@ function HorizontalScroll() {
 
 	const handleSwiping = useCallback(
 		({ deltaX }) => {
+			// 一次手勢最多預覽相鄰的一張，維持單步輪播的操作預期。
 			scheduleDeltaX(
 				clamp(deltaX, -galleryLayout.itemStep, galleryLayout.itemStep)
 			);
@@ -273,6 +289,7 @@ function HorizontalScroll() {
 				return;
 			}
 
+			// 位移達四分之一張，或速度達門檻，就提交到相鄰項目；否則彈回原位。
 			const shouldChangeItem =
 				Math.abs(deltaX) >= galleryLayout.itemStep * 0.25 ||
 				velocityX >= flingVelocityThreshold;
@@ -309,6 +326,7 @@ function HorizontalScroll() {
 	useEffect(() => clearPendingTransition, [clearPendingTransition]);
 
 	useLayoutEffect(() => {
+		// 尺寸須在繪製前同步更新，避免調整容器大小時先以舊寬度閃現一幀。
 		const updateGalleryLayout = (width) => {
 			const nextLayout = getGalleryLayout(width);
 			setGalleryLayout((currentLayout) =>
@@ -322,6 +340,7 @@ function HorizontalScroll() {
 		const updateFromContainer = () => updateGalleryLayout(getContainerWidth());
 
 		updateFromContainer();
+		// ResizeObserver 能偵測非視窗造成的容器變更；舊瀏覽器則退回 window resize。
 		if (typeof ResizeObserver === "undefined") {
 			window.addEventListener("resize", updateFromContainer);
 			return () => window.removeEventListener("resize", updateFromContainer);
@@ -334,12 +353,22 @@ function HorizontalScroll() {
 		return () => resizeObserver.disconnect();
 	}, []);
 
-	const loopedVideos = Array.from(
-		{ length: galleryLayout.loopCopiesPerSide * 2 + 1 },
-		(_, copyIndex) => ({
-			copyIndex,
-			videos: videoList,
-		})
+	const centerVirtualIndex = Math.floor(galleryLayout.virtualItemCount / 2);
+	// 僅保留可視卡片與左右緩衝區；資料再多也不會讓輪播 DOM 線性成長。
+	const virtualVideos = Array.from(
+		{ length: galleryLayout.virtualItemCount },
+		(_, virtualIndex) => {
+			const logicalIndex = activeIndex + virtualIndex - centerVirtualIndex;
+			return {
+				isBuffer:
+					virtualIndex < virtualItemBuffer ||
+					virtualIndex >= galleryLayout.virtualItemCount - virtualItemBuffer,
+				logicalIndex,
+				video: initialVideos[
+					getCircularIndex(logicalIndex, initialVideos.length)
+				],
+			};
+		}
 	);
 
 	return (
@@ -352,24 +381,19 @@ function HorizontalScroll() {
 				<ShowcaseList
 					deltaX={deltaX}
 					hasTransition={hasTransition}
-					loopOffset={
-						galleryLayout.loopCopiesPerSide * galleryLayout.sequenceWidth
-					}
 					listingWidth={galleryLayout.listingWidth}
 					transitionDuration={transitionDuration}
 				>
-					{loopedVideos.flatMap(({ copyIndex, videos }) =>
-						videos.map((video) => (
-							<VideoElement
-								dimensions={galleryLayout}
-								isClone={copyIndex !== galleryLayout.loopCopiesPerSide}
-								isSelected={selectedVideo === video.name}
-								key={`${copyIndex}-${video.name}`}
-								onSelect={setSelectedVideo}
-								value={video}
-							/>
-						))
-					)}
+					{virtualVideos.map(({ isBuffer, logicalIndex, video }) => (
+						<VideoElement
+							dimensions={galleryLayout}
+							isBuffer={isBuffer}
+							isSelected={selectedVideo === video.name}
+							key={logicalIndex}
+							onSelect={setSelectedVideo}
+							value={video}
+						/>
+					))}
 				</ShowcaseList>
 			</Swipeable>
 		</StyledHomeShowcaseList>
@@ -393,11 +417,10 @@ const ShowcaseList = styled.div.attrs(
 		deltaX = 0,
 		hasTransition = false,
 		listingWidth,
-		loopOffset,
 		transitionDuration,
 	}) => ({
 		style: {
-			transform: `translate3d(calc(-${loopOffset + listingWidth / 2}px + ${deltaX}px), 0, 0)`,
+			transform: `translate3d(calc(-${listingWidth / 2}px + ${deltaX}px), 0, 0)`,
 		transition: `transform ${hasTransition ? transitionDuration : 0}s cubic-bezier(0.22, 0.61, 0.36, 1)`,
 		width: `${listingWidth}px`,
 	},
