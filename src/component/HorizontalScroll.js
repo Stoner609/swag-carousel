@@ -9,6 +9,8 @@ const dragStartThreshold = 8;
 const flingVelocityThreshold = 0.45;
 // 額外渲染在可視範圍兩側的卡片數量，供滑動時作為緩衝。
 const virtualItemBuffer = 2;
+// 示範用資料筆數，用於驗證虛擬渲染不會隨資料量增加 DOM。
+const demoItemCount = 100;
 // 單張卡片允許的最大寬度。
 const maximumItemWidth = 320;
 // 相鄰卡片之間的間距。
@@ -21,7 +23,7 @@ const mobileSidePeek = 24;
 const clamp = (value, minimum, maximum) =>
 	Math.min(Math.max(value, minimum), maximum);
 // 輪播使用的影片卡片資料。
-const initialVideos = [
+const galleryImages = [
 	{ name: "Mountain sunrise", image: "/images/mountain.jpg" },
 	{ name: "City at blue hour", image: "/images/city.jpg" },
 	{ name: "Forest waterfall", image: "/images/forest.jpg" },
@@ -30,7 +32,17 @@ const initialVideos = [
 	{ name: "Alpine lake", image: "/images/alpine-lake.png" },
 	{ name: "Green river valley", image: "/images/green-valley.png" },
 	{ name: "Red sandstone canyon", image: "/images/red-canyon.png" },
+	{ name: "Coastal lighthouse", image: "/images/coastal-lighthouse.png" },
+	{ name: "Lavender field", image: "/images/lavender-field.png" },
+	{ name: "Autumn forest path", image: "/images/autumn-path.png" },
+	{ name: "Winter cabin", image: "/images/winter-cabin.png" },
 ];
+
+// 以 12 張示範圖片組成 100 筆唯一項目，避免圖片檔案數量干擾虛擬化驗證。
+const initialVideos = Array.from({ length: demoItemCount }, (_, index) => {
+	const image = galleryImages[index % galleryImages.length];
+	return { ...image, index: index + 1, name: `${image.name} #${index + 1}` };
+});
 
 // 將任意索引轉為資料陣列範圍內的循環索引。
 const getCircularIndex = (index, itemCount) =>
@@ -85,6 +97,9 @@ function VideoElement({ dimensions, isBuffer = false, isSelected, onSelect, valu
 				src={value.image}
 				width={dimensions.itemWidth}
 			/>
+			<CardIndex aria-hidden="true">
+				#{value.index} / {demoItemCount}
+			</CardIndex>
 		</VideoCard>
 	);
 }
@@ -440,6 +455,9 @@ function HorizontalScroll() {
 					))}
 				</ShowcaseList>
 			</Swipeable>
+			<CarouselStatus>
+				資料集：{initialVideos.length} 筆／目前渲染：{galleryLayout.virtualItemCount} 張卡片
+			</CarouselStatus>
 		</StyledHomeShowcaseList>
 	);
 }
@@ -454,6 +472,12 @@ const StyledSwipeable = styled.div`
 	width: 100%;
 	touch-action: pan-y;
 	user-select: none;
+`;
+
+const CarouselStatus = styled.p`
+	margin: 8px 0 0;
+	color: #475569;
+	font-size: 0.875rem;
 `;
 
 const ShowcaseList = styled.div.attrs(
@@ -485,6 +509,7 @@ const ShowcaseList = styled.div.attrs(
 `;
 
 const VideoCard = styled.button`
+	position: relative;
 	box-sizing: border-box;
 	width: ${({ $width }) => $width}px;
 	height: ${({ $height }) => $height}px;
@@ -513,6 +538,20 @@ const CardImage = styled.img`
 	width: 100%;
 	height: 100%;
 	object-fit: cover;
+	pointer-events: none;
+`;
+
+const CardIndex = styled.span`
+	position: absolute;
+	right: 8px;
+	bottom: 8px;
+	padding: 3px 7px;
+	border-radius: 999px;
+	background: rgb(15 23 42 / 80%);
+	color: #fff;
+	font-size: 0.75rem;
+	font-weight: 600;
+	line-height: 1.2;
 	pointer-events: none;
 `;
 
