@@ -5,6 +5,8 @@ import styled from "styled-components";
 const showcaseSwipeTransitionSeconds = 0.6;
 // 移動未超過 8px 不算拖曳，避免點擊抖動誤判
 const dragStartThreshold = 8;
+// 拖曳結束後只在短時間內攔截瀏覽器自動補發的 click。
+const dragClickSuppressionMilliseconds = 250;
 // 甩動速度門檻，單位 px/ms；距離短但夠快仍會換卡
 const flingVelocityThreshold = 0.45;
 // 額外渲染在可視範圍兩側的卡片數量，供滑動時作為緩衝。
@@ -121,8 +123,8 @@ function Swipeable({ children, onSwipeStart, onSwiping, onSwipeEnd }) {
 	const isDragging = useRef(false);
 	// 已判定的手勢方向軸：pending、horizontal 或 vertical。
 	const gestureAxis = useRef(null);
-	// 拖曳結束後是否需要攔截緊接著觸發的 click 事件。
-	const suppressClick = useRef(false);
+	// 拖曳結束後需要攔截 click 的截止時間，避免狀態殘留吃掉後續正常點擊。
+	const suppressClickUntil = useRef(0);
 
 	callbacksRef.current = { onSwipeStart, onSwiping, onSwipeEnd };
 
@@ -144,7 +146,9 @@ function Swipeable({ children, onSwipeStart, onSwiping, onSwipeEnd }) {
 		startTime.current = 0;
 		isDragging.current = false;
 		gestureAxis.current = null;
-		suppressClick.current = didDrag;
+		suppressClickUntil.current = didDrag
+			? Date.now() + dragClickSuppressionMilliseconds
+			: 0;
 
 		if (didDrag) {
 			callbacksRef.current.onSwipeEnd({
@@ -165,9 +169,6 @@ function Swipeable({ children, onSwipeStart, onSwiping, onSwipeEnd }) {
 		endX.current = event.clientX;
 		startTime.current = Date.now();
 		gestureAxis.current = "pending";
-		if (event.currentTarget.setPointerCapture) {
-			event.currentTarget.setPointerCapture(event.pointerId);
-		}
 	}, []);
 
 	const handlePointerMove = useCallback((event) => {
@@ -193,6 +194,9 @@ function Swipeable({ children, onSwipeStart, onSwiping, onSwipeEnd }) {
 
 		if (!isDragging.current) {
 			isDragging.current = true;
+			if (event.currentTarget.setPointerCapture) {
+				event.currentTarget.setPointerCapture(event.pointerId);
+			}
 			callbacksRef.current.onSwipeStart();
 		}
 
@@ -226,11 +230,14 @@ function Swipeable({ children, onSwipeStart, onSwiping, onSwipeEnd }) {
 
 	const handleClickCapture = useCallback((event) => {
 		// 拖曳結束會接著觸發 click；攔截它以免意外選取卡片。
-		if (!suppressClick.current) return;
+		if (Date.now() > suppressClickUntil.current) {
+			suppressClickUntil.current = 0;
+			return;
+		}
 
 		event.preventDefault();
 		event.stopPropagation();
-		suppressClick.current = false;
+		suppressClickUntil.current = 0;
 	}, []);
 
 	// 元件卸載時一併結束仍被 capture 的手勢，避免保留過期狀態。
